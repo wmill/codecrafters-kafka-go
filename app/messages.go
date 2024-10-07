@@ -9,6 +9,11 @@ import (
 	"net"
 )
 
+// Request Header v0 => request_api_key request_api_version correlation_id
+//   request_api_key => INT16
+//   request_api_version => INT16
+//   correlation_id => INT32
+
 /*
 ApiVersions Response (Version: 3) => error_code [api_keys] throttle_time_ms TAG_BUFFER
   error_code => INT16
@@ -36,7 +41,7 @@ func (a *ApiVersionsResponse) toBytes() []byte {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, a.correlation_id)
 	binary.Write(buf, binary.BigEndian, a.error_code)
-	// api_keys length needs to be sent as a varint, use AppendVarint
+	// array length needs to be sent as a uvarint, use AppendVarint
 	lengthVarint := make([]byte, 0)
 	lengthVarint = binary.AppendUvarint(lengthVarint, uint64(len(a.api_keys)+1))
 	buf.Write(lengthVarint)
@@ -58,6 +63,100 @@ ApiVersions Request (Version: 3) => client_software_name client_software_version
   client_software_name => COMPACT_STRING
   client_software_version => COMPACT_STRING
 */
+
+/*
+
+Fetch Response (Version: 16) => throttle_time_ms error_code session_id [responses] TAG_BUFFER
+  throttle_time_ms => INT32
+  error_code => INT16
+  session_id => INT32
+  responses => topic_id [partitions] TAG_BUFFER
+    topic_id => UUID
+    partitions => partition_index error_code high_watermark last_stable_offset log_start_offset [aborted_transactions] preferred_read_replica records TAG_BUFFER
+      partition_index => INT32
+      error_code => INT16
+      high_watermark => INT64
+      last_stable_offset => INT64
+      log_start_offset => INT64
+      aborted_transactions => producer_id first_offset TAG_BUFFER
+        producer_id => INT64
+        first_offset => INT64
+      preferred_read_replica => INT32
+      records => COMPACT_RECORDS
+
+*/
+
+type FetchResponse struct {
+	correlation_id   uint32
+	throttle_time_ms uint32
+	error_code       uint16
+	session_id       uint32
+	responses        []FetchResponseTopic
+}
+
+type FetchResponseTopic struct {
+	topic_id   []byte
+	partitions []FetchResponsePartition
+}
+
+type FetchResponsePartition struct {
+	partition_index        uint32
+	error_code             uint16
+	high_watermark         uint64
+	last_stable_offset     uint64
+	log_start_offset       uint64
+	aborted_transactions   []FetchResponseAbortedTransaction
+	preferred_read_replica uint32
+	records                []byte
+}
+
+type FetchResponseAbortedTransaction struct {
+	producer_id  uint64
+	first_offset uint64
+}
+
+func (f *FetchResponse) toBytes() []byte {
+	buf := new(bytes.Buffer)
+	binary.Write(buf, binary.BigEndian, f.correlation_id)
+	binary.Write(buf, binary.BigEndian, f.throttle_time_ms)
+	binary.Write(buf, binary.BigEndian, f.error_code)
+	binary.Write(buf, binary.BigEndian, f.session_id)
+
+	// array length needs to be sent as a uvarint, use AppendVarint
+	lengthVarint := make([]byte, 0)
+	// arrayLength := len(f.responses) + 1
+	// if arrayLength == 1 {}
+
+	lengthVarint = binary.AppendUvarint(lengthVarint, uint64(len(f.responses)+1))
+	buf.Write(lengthVarint)
+
+	for _, response := range f.responses {
+		buf.Write(response.topic_id)
+		// array length needs to be sent as a uvarint, use AppendVarint
+		lengthVarint := make([]byte, 0)
+		lengthVarint = binary.AppendUvarint(lengthVarint, uint64(len(f.responses)+1))
+		buf.Write(lengthVarint)
+		for _, partition := range response.partitions {
+			binary.Write(buf, binary.BigEndian, partition.partition_index)
+			binary.Write(buf, binary.BigEndian, partition.error_code)
+			binary.Write(buf, binary.BigEndian, partition.high_watermark)
+			binary.Write(buf, binary.BigEndian, partition.last_stable_offset)
+			binary.Write(buf, binary.BigEndian, partition.log_start_offset)
+			for _, aborted_transaction := range partition.aborted_transactions {
+				binary.Write(buf, binary.BigEndian, aborted_transaction.producer_id)
+				binary.Write(buf, binary.BigEndian, aborted_transaction.first_offset)
+				buf.Write([]byte{0x00}) // TAG_BUFFER
+			}
+			binary.Write(buf, binary.BigEndian, partition.preferred_read_replica)
+			buf.Write(partition.records)
+			buf.Write([]byte{0x00}) // TAG_BUFFER
+		}
+		buf.Write([]byte{0x00}) // TAG_BUFFER
+	}
+	buf.Write([]byte{0x00}) // TAG_BUFFER
+	buf.Write([]byte{0x00}) // TAG_BUFFER
+	return buf.Bytes()
+}
 
 func createResponse(rawResponse []byte) []byte {
 	buf := new(bytes.Buffer)
@@ -100,6 +199,8 @@ func parseRequest(conn net.Conn) {
 	switch request_api_key {
 	case API_VERSIONS:
 		handleApiVersionsRequest(conn, messageBuffer)
+	case FETCH:
+		handleFetchRequest(conn, messageBuffer)
 	}
 }
 
@@ -108,7 +209,7 @@ func handleApiVersionsRequest(conn net.Conn, message []byte) {
 	correlation_id := binary.BigEndian.Uint32(message[4:8])
 	// todo parse out the agent strings and process the rest of request.
 
-	message_error_code := 0
+	message_error_code := NONE
 	if request_api_version > 4 {
 		message_error_code = UNSUPPORTED_VERSION
 	}
@@ -129,4 +230,24 @@ func handleApiVersionsRequest(conn net.Conn, message []byte) {
 	response := createResponse(api_versions_response)
 	conn.Write(response)
 
+}
+
+func handleFetchRequest(conn net.Conn, message []byte) {
+	//request_api_version := binary.BigEndian.Uint16(message[2:4])
+	correlation_id := binary.BigEndian.Uint32(message[4:8])
+	fmt.Println("Correlation ID (fetch): ", correlation_id)
+
+	fetch_response := FetchResponse{
+		correlation_id:   correlation_id,
+		throttle_time_ms: 0,
+		error_code:       NONE,
+		session_id:       0,
+		responses:        []FetchResponseTopic{},
+	}
+
+	fetch_response_bytes := fetch_response.toBytes()
+	fmt.Println(hex.EncodeToString(fetch_response_bytes))
+
+	response := createResponse(fetch_response_bytes)
+	conn.Write(response)
 }
