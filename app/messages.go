@@ -44,8 +44,10 @@ func (a *ApiVersionsResponse) toBytes() []byte {
 		binary.Write(buf, binary.BigEndian, apiKey.api_key)
 		binary.Write(buf, binary.BigEndian, apiKey.min_version)
 		binary.Write(buf, binary.BigEndian, apiKey.max_version)
+		buf.Write([]byte{0x00}) // TAG_BUFFER
 	}
 	binary.Write(buf, binary.BigEndian, a.throttle_time_ms)
+	buf.Write([]byte{0x00}) // TAG_BUFFER
 	return buf.Bytes()
 }
 
@@ -68,7 +70,7 @@ func parseRequest(conn net.Conn) {
 	lengthBuffer := make([]byte, 4)
 	_, err := io.ReadFull(conn, lengthBuffer)
 
-	if err != nil {
+	if err != nil && err != io.EOF {
 		fmt.Println("Error reading length of message")
 		fmt.Println(err)
 		return
@@ -118,9 +120,6 @@ func parseRequest(conn net.Conn) {
 }
 
 func handleApiVersionsRequest(conn net.Conn, message []byte) {
-	// api_versions_response := make([]byte, 4)
-	// binary.BigEndian.PutUint32(api_versions_response, 0)
-	// conn.Write(api_versions_response)
 	request_api_version := binary.BigEndian.Uint16(message[2:4])
 	correlation_id := binary.BigEndian.Uint32(message[4:8])
 	// todo parse out the agent strings and process the rest of request.
@@ -134,24 +133,14 @@ func handleApiVersionsRequest(conn net.Conn, message []byte) {
 		correlation_id:   correlation_id,
 		error_code:       uint16(message_error_code),
 		throttle_time_ms: 0,
-		api_keys:         []ApiKeys{},
+		api_keys: []ApiKeys{
+			{API_VERSIONS, 0, 4},
+		},
 	}
 
 	api_versions_response := api_response.toBytes()
 	fmt.Println(hex.EncodeToString(api_versions_response))
 
-	// var api_versions_response []byte
-	// var tempInt16 = make([]byte, 2)
-	// var tempInt32 = make([]byte, 4)
-	// binary.BigEndian.PutUint32(tempInt32, correlation_id)
-	// api_versions_response = append(api_versions_response, tempInt32...)
-	// binary.BigEndian.PutUint16(tempInt16, uint16(message_error_code))
-	// api_versions_response = append(api_versions_response, tempInt16...)
-
-	// response_length := len(api_versions_response)
-	// binary.BigEndian.PutUint32(tempInt32, uint32(response_length))
-
-	// response := append(tempInt32, api_versions_response...)
 	response := createResponse(api_versions_response)
 	conn.Write(response)
 
