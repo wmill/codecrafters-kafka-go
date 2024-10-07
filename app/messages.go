@@ -38,7 +38,7 @@ func (a *ApiVersionsResponse) toBytes() []byte {
 	binary.Write(buf, binary.BigEndian, a.error_code)
 	// api_keys length needs to be sent as a varint, use AppendVarint
 	lengthVarint := make([]byte, 0)
-	lengthVarint = binary.AppendVarint(lengthVarint, int64(len(a.api_keys)))
+	lengthVarint = binary.AppendUvarint(lengthVarint, uint64(len(a.api_keys)+1))
 	buf.Write(lengthVarint)
 	for _, apiKey := range a.api_keys {
 		binary.Write(buf, binary.BigEndian, apiKey.api_key)
@@ -46,8 +46,10 @@ func (a *ApiVersionsResponse) toBytes() []byte {
 		binary.Write(buf, binary.BigEndian, apiKey.max_version)
 		buf.Write([]byte{0x00}) // TAG_BUFFER
 	}
+
 	binary.Write(buf, binary.BigEndian, a.throttle_time_ms)
 	buf.Write([]byte{0x00}) // TAG_BUFFER
+
 	return buf.Bytes()
 }
 
@@ -95,24 +97,6 @@ func parseRequest(conn net.Conn) {
 	fmt.Println("Request API Version: ", request_api_version)
 	fmt.Println("Correlation ID: ", correlation_id)
 
-	// fmt.Println(messageBuffer)
-	// strLen, messageBuffer := fromZigzag(messageBuffer[8:])
-	// client_software_name := string(messageBuffer[:strLen])
-	// fmt.Println(messageBuffer)
-	// messageBuffer = messageBuffer[strLen:]
-	// fmt.Println(messageBuffer)
-
-	// fmt.Println("Client Software Name: ", client_software_name)
-
-	// strLen, messageBuffer = fromZigzag(messageBuffer[:])
-	// fmt.Println(strLen, messageBuffer)
-	// client_software_version := string(messageBuffer[:strLen])
-	// fmt.Println(strLen, messageBuffer)
-	// messageBuffer = messageBuffer[strLen:]
-	// fmt.Println(messageBuffer)
-
-	// fmt.Println("Client Software Version: ", client_software_version)
-
 	switch request_api_key {
 	case API_VERSIONS:
 		handleApiVersionsRequest(conn, messageBuffer)
@@ -135,6 +119,7 @@ func handleApiVersionsRequest(conn net.Conn, message []byte) {
 		throttle_time_ms: 0,
 		api_keys: []ApiKeys{
 			{API_VERSIONS, 0, 4},
+			{FETCH, 0, 16},
 		},
 	}
 
