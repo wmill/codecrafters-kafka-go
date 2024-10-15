@@ -9,10 +9,18 @@ import (
 	"net"
 )
 
-// Request Header v0 => request_api_key request_api_version correlation_id
-//   request_api_key => INT16
-//   request_api_version => INT16
-//   correlation_id => INT32
+/*
+
+Request Header v2 => request_api_key request_api_version correlation_id client_id TAG_BUFFER
+  request_api_key => INT16
+  request_api_version => INT16
+  correlation_id => INT32
+  client_id => NULLABLE_STRING
+
+Response Header v1 => correlation_id TAG_BUFFER
+  correlation_id => INT32
+
+*/
 
 /*
 ApiVersions Response (Version: 3) => error_code [api_keys] throttle_time_ms TAG_BUFFER
@@ -62,6 +70,8 @@ func (a *ApiVersionsResponse) toBytes() []byte {
 ApiVersions Request (Version: 3) => client_software_name client_software_version TAG_BUFFER
   client_software_name => COMPACT_STRING
   client_software_version => COMPACT_STRING
+
+COMPACT_STRING is a length-prefixed string. The length is encoded as a uvarint followed by the UTF-8 encoded string.
 */
 
 /*
@@ -84,78 +94,75 @@ Fetch Response (Version: 16) => throttle_time_ms error_code session_id [response
       preferred_read_replica => INT32
       records => COMPACT_RECORDS
 
+
+NULLABLE_STRING => length-prefixed string
+int16 length followed by string
+
+Request Header v2 => request_api_key request_api_version correlation_id client_id TAG_BUFFER
+  request_api_key => INT16
+  request_api_version => INT16
+  correlation_id => INT32
+  client_id => NULLABLE_STRING
+
+Fetch Request (Version: 16) => max_wait_ms min_bytes max_bytes isolation_level session_id session_epoch [topics] [forgotten_topics_data] rack_id TAG_BUFFER
+  max_wait_ms => INT32
+  min_bytes => INT32
+  max_bytes => INT32
+  isolation_level => INT8
+  session_id => INT32
+  session_epoch => INT32
+  topics => topic_id [partitions] TAG_BUFFER
+    topic_id => UUID
+    partitions => partition current_leader_epoch fetch_offset last_fetched_epoch log_start_offset partition_max_bytes TAG_BUFFER
+      partition => INT32
+      current_leader_epoch => INT32
+      fetch_offset => INT64
+      last_fetched_epoch => INT32
+      log_start_offset => INT64
+      partition_max_bytes => INT32
+  forgotten_topics_data => topic_id [partitions] TAG_BUFFER
+    topic_id => UUID
+    partitions => INT32
+  rack_id => COMPACT_STRING
 */
 
-type FetchResponse struct {
-	correlation_id   uint32
-	throttle_time_ms uint32
-	error_code       uint16
-	session_id       uint32
-	responses        []FetchResponseTopic
+type GenericRequest struct {
+	request_api_key     uint16
+	request_api_version uint16
+	correlation_id      uint32
+	client_id           []byte
 }
 
-type FetchResponseTopic struct {
-	topic_id   []byte
-	partitions []FetchResponsePartition
+type FetchRequest struct {
+	GenericRequest
+	max_wait_ms           uint32
+	min_bytes             uint32
+	max_bytes             uint32
+	isolation_level       uint8
+	session_id            uint32
+	session_epoch         uint32
+	topics                []FetchRequestTopic
+	forgotten_topics_data []FetchRequestForgottenTopicsData
+	rack_id               []byte
 }
 
-type FetchResponsePartition struct {
-	partition_index        uint32
-	error_code             uint16
-	high_watermark         uint64
-	last_stable_offset     uint64
-	log_start_offset       uint64
-	aborted_transactions   []FetchResponseAbortedTransaction
-	preferred_read_replica uint32
-	records                []byte
+type FetchRequestTopic struct {
+	topic_id   [16]byte
+	partitions []FetchRequestPartition
 }
 
-type FetchResponseAbortedTransaction struct {
-	producer_id  uint64
-	first_offset uint64
+type FetchRequestPartition struct {
+	partition            uint32
+	current_leader_epoch uint32
+	fetch_offset         uint64
+	last_fetched_epoch   uint32
+	log_start_offset     uint64
+	partition_max_bytes  uint32
 }
 
-func (f *FetchResponse) toBytes() []byte {
-	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, f.correlation_id)
-	binary.Write(buf, binary.BigEndian, f.throttle_time_ms)
-	binary.Write(buf, binary.BigEndian, f.error_code)
-	binary.Write(buf, binary.BigEndian, f.session_id)
-
-	// array length needs to be sent as a uvarint, use AppendVarint
-	lengthVarint := make([]byte, 0)
-	// arrayLength := len(f.responses) + 1
-	// if arrayLength == 1 {}
-
-	lengthVarint = binary.AppendUvarint(lengthVarint, uint64(len(f.responses)+1))
-	buf.Write(lengthVarint)
-
-	for _, response := range f.responses {
-		buf.Write(response.topic_id)
-		// array length needs to be sent as a uvarint, use AppendVarint
-		lengthVarint := make([]byte, 0)
-		lengthVarint = binary.AppendUvarint(lengthVarint, uint64(len(f.responses)+1))
-		buf.Write(lengthVarint)
-		for _, partition := range response.partitions {
-			binary.Write(buf, binary.BigEndian, partition.partition_index)
-			binary.Write(buf, binary.BigEndian, partition.error_code)
-			binary.Write(buf, binary.BigEndian, partition.high_watermark)
-			binary.Write(buf, binary.BigEndian, partition.last_stable_offset)
-			binary.Write(buf, binary.BigEndian, partition.log_start_offset)
-			for _, aborted_transaction := range partition.aborted_transactions {
-				binary.Write(buf, binary.BigEndian, aborted_transaction.producer_id)
-				binary.Write(buf, binary.BigEndian, aborted_transaction.first_offset)
-				buf.Write([]byte{0x00}) // TAG_BUFFER
-			}
-			binary.Write(buf, binary.BigEndian, partition.preferred_read_replica)
-			buf.Write(partition.records)
-			buf.Write([]byte{0x00}) // TAG_BUFFER
-		}
-		buf.Write([]byte{0x00}) // TAG_BUFFER
-	}
-	buf.Write([]byte{0x00}) // TAG_BUFFER
-	buf.Write([]byte{0x00}) // TAG_BUFFER
-	return buf.Bytes()
+type FetchRequestForgottenTopicsData struct {
+	topic_id   [16]byte
+	partitions []uint32
 }
 
 func createResponse(rawResponse []byte) []byte {
@@ -233,20 +240,32 @@ func handleApiVersionsRequest(conn net.Conn, message []byte) {
 }
 
 func handleFetchRequest(conn net.Conn, message []byte) {
-	//request_api_version := binary.BigEndian.Uint16(message[2:4])
+	// quick check will remove later
 	correlation_id := binary.BigEndian.Uint32(message[4:8])
 	fmt.Println("Correlation ID (fetch): ", correlation_id)
 
-	fetch_response := FetchResponse{
-		correlation_id:   correlation_id,
-		throttle_time_ms: 0,
-		error_code:       NONE,
-		session_id:       0,
-		responses:        []FetchResponseTopic{},
-	}
+	fetch_request := createFetchRequestFromBytes(message)
+	fmt.Println(fetch_request)
+
+	// fetch_response := FetchResponse{
+	// 	correlation_id:   correlation_id,
+	// 	throttle_time_ms: 0,
+	// 	error_code:       NONE,
+	// 	session_id:       0,
+	// 	responses:        []FetchResponseTopic{},
+	// }
+
+	fetch_response := createFetchResponseFromFetchRequest(fetch_request)
+	fetch_response.error_code = UNKNOWN_TOPIC_ID
 
 	fetch_response_bytes := fetch_response.toBytes()
-	fmt.Println(hex.EncodeToString(fetch_response_bytes))
+	fmt.Printf("Fetch Response bytes: %s\n", hex.EncodeToString(fetch_response_bytes))
+	fmt.Println("Fetch Response length: ", len(fetch_response_bytes))
+
+	// FIXME trimming off the last 53 bytes to see if it fixes the issue
+	// fetch_response_bytes = fetch_response_bytes[:len(fetch_response_bytes)-53]
+	// fmt.Printf("Fetch Response bytes: %s\n", hex.EncodeToString(fetch_response_bytes))
+	// fmt.Println("Fetch Response length: ", len(fetch_response_bytes))
 
 	response := createResponse(fetch_response_bytes)
 	conn.Write(response)

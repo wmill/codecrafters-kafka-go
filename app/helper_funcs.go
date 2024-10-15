@@ -1,5 +1,7 @@
 package main
 
+import "fmt"
+
 func zigzag_encode(n int) int {
 	return (n << 1) ^ (n >> 31)
 }
@@ -21,4 +23,15 @@ func fromZigzag(buf []byte) (int64, []byte) {
 		return int64(z>>1) ^ -1, buf[1:]
 	}
 	return int64(z >> 1), buf[1:]
+}
+
+func printByteSliceAsGoCode(data []byte) {
+	fmt.Print("[]byte{")
+	for i, b := range data {
+		if i > 0 {
+			fmt.Print(", ")
+		}
+		fmt.Printf("0x%02x", b)
+	}
+	fmt.Println("}")
 }
