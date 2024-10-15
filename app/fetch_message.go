@@ -1,3 +1,12 @@
+package main
+
+import (
+	"bytes"
+	"encoding/binary"
+	"encoding/hex"
+	"fmt"
+	"net"
+)
 
 func createFetchRequestFromBytes(message []byte) FetchRequest {
 	// parse the request
@@ -36,13 +45,6 @@ func createFetchRequestFromBytes(message []byte) FetchRequest {
 	buf.Next(topic_length_bytes)
 	for i := 0; i < int(topic_length)-1; i++ {
 		frt := FetchRequestTopic{}
-		// topic_id_length, topic_id_length_bytes := binary.Uvarint(buf.Bytes())
-
-		// if topic_id_length_bytes < 0 {
-		// 	fmt.Println("Error parsing topic_id_length")
-		// 	return fr
-		// }
-		// buf.Next(topic_id_length_bytes)
 
 		var topicID [16]byte
 		copy(topicID[:], buf.Next(16))
@@ -75,14 +77,7 @@ func createFetchRequestFromBytes(message []byte) FetchRequest {
 	buf.Next(forgotten_topics_length_bytes)
 	for i := 0; i < int(forgotten_topics_length)-1; i++ {
 		frftd := FetchRequestForgottenTopicsData{}
-		// topic_id_length, topic_id_length_bytes := binary.Uvarint(buf.Bytes())
 
-		// if topic_id_length_bytes < 0 {
-		// 	fmt.Println("Error parsing topic_id_length")
-		// 	return fr
-		// }
-		// buf.Next(topic_id_length_bytes)
-		// frftd.topic_id = buf.Next(int(topic_id_length))
 		var topicID [16]byte
 		copy(topicID[:], buf.Next(16))
 		frftd.topic_id = topicID
@@ -112,35 +107,6 @@ func createFetchRequestFromBytes(message []byte) FetchRequest {
 	fr.rack_id = buf.Next(int(rack_id_length))
 
 	return fr
-}
-
-type FetchResponse struct {
-	correlation_id   uint32
-	throttle_time_ms uint32
-	error_code       uint16
-	session_id       uint32
-	responses        []FetchResponseTopic
-}
-
-type FetchResponseTopic struct {
-	topic_id   [16]byte
-	partitions []FetchResponsePartition
-}
-
-type FetchResponsePartition struct {
-	partition_index        uint32
-	error_code             uint16
-	high_watermark         uint64
-	last_stable_offset     uint64
-	log_start_offset       uint64
-	aborted_transactions   []FetchResponseAbortedTransaction
-	preferred_read_replica uint32
-	records                []byte
-}
-
-type FetchResponseAbortedTransaction struct {
-	producer_id  uint64
-	first_offset uint64
 }
 
 func (f *FetchResponse) toBytes() []byte {
@@ -211,4 +177,36 @@ func createFetchResponseFromFetchRequest(fr FetchRequest) FetchResponse {
 	}
 
 	return frr
+}
+
+func handleFetchRequest(conn net.Conn, message []byte) {
+	// quick check will remove later
+	correlation_id := binary.BigEndian.Uint32(message[4:8])
+	fmt.Println("Correlation ID (fetch): ", correlation_id)
+
+	fetch_request := createFetchRequestFromBytes(message)
+	fmt.Println(fetch_request)
+
+	// fetch_response := FetchResponse{
+	// 	correlation_id:   correlation_id,
+	// 	throttle_time_ms: 0,
+	// 	error_code:       NONE,
+	// 	session_id:       0,
+	// 	responses:        []FetchResponseTopic{},
+	// }
+
+	fetch_response := createFetchResponseFromFetchRequest(fetch_request)
+	fetch_response.error_code = UNKNOWN_TOPIC_ID
+
+	fetch_response_bytes := fetch_response.toBytes()
+	fmt.Printf("Fetch Response bytes: %s\n", hex.EncodeToString(fetch_response_bytes))
+	fmt.Println("Fetch Response length: ", len(fetch_response_bytes))
+
+	// FIXME trimming off the last 53 bytes to see if it fixes the issue
+	// fetch_response_bytes = fetch_response_bytes[:len(fetch_response_bytes)-53]
+	// fmt.Printf("Fetch Response bytes: %s\n", hex.EncodeToString(fetch_response_bytes))
+	// fmt.Println("Fetch Response length: ", len(fetch_response_bytes))
+
+	response := createResponse(fetch_response_bytes)
+	conn.Write(response)
 }
