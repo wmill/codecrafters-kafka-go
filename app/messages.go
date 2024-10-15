@@ -50,38 +50,6 @@ type GenericRequest struct {
 	client_id           []byte
 }
 
-type FetchRequest struct {
-	GenericRequest
-	max_wait_ms           uint32
-	min_bytes             uint32
-	max_bytes             uint32
-	isolation_level       uint8
-	session_id            uint32
-	session_epoch         uint32
-	topics                []FetchRequestTopic
-	forgotten_topics_data []FetchRequestForgottenTopicsData
-	rack_id               []byte
-}
-
-type FetchRequestTopic struct {
-	topic_id   [16]byte
-	partitions []FetchRequestPartition
-}
-
-type FetchRequestPartition struct {
-	partition            uint32
-	current_leader_epoch uint32
-	fetch_offset         uint64
-	last_fetched_epoch   uint32
-	log_start_offset     uint64
-	partition_max_bytes  uint32
-}
-
-type FetchRequestForgottenTopicsData struct {
-	topic_id   [16]byte
-	partitions []uint32
-}
-
 func createResponse(rawResponse []byte) []byte {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, uint32(len(rawResponse)))

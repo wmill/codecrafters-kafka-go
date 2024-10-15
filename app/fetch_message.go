@@ -149,7 +149,8 @@ func (f *FetchResponse) toBytes() []byte {
 		buf.Write([]byte{0x00}) // TAG_BUFFER
 	}
 	buf.Write([]byte{0x00}) // TAG_BUFFER
-	buf.Write([]byte{0x00}) // TAG_BUFFER
+	// FIXME: this is a hack to make the length correct, need to fix the actual issue
+	buf.Write([]byte{0x00, 0x00})
 	return buf.Bytes()
 }
 
