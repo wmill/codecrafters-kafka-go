@@ -109,3 +109,19 @@ func (fr *FetchRequest) String() string {
 func (frt *FetchRequestTopic) String() string {
 	return fmt.Sprintf("FetchRequestTopic{topic_id: %x, partitions: %v}", frt.topic_id, frt.partitions)
 }
+
+func (frt *FetchRequestPartition) String() string {
+	return fmt.Sprintf("FetchRequestPartition{partition: %d, current_leader_epoch: %d, fetch_offset: %d, last_fetched_epoch: %d, log_start_offset: %d, partition_max_bytes: %d}", frt.partition, frt.current_leader_epoch, frt.fetch_offset, frt.last_fetched_epoch, frt.log_start_offset, frt.partition_max_bytes)
+}
+
+func (frft *FetchRequestForgottenTopicsData) String() string {
+	return fmt.Sprintf("FetchRequestForgottenTopicsData{topic_id: %x, partitions: %v}", frft.topic_id, frft.partitions)
+}
+
+func (frt *FetchResponsePartition) String() string {
+	return fmt.Sprintf("FetchResponsePartition{partition_index: %d, error_code: %d, high_watermark: %d, last_stable_offset: %d, log_start_offset: %d, aborted_transactions: %v, preferred_read_replica: %d, records: %v}", frt.partition_index, frt.error_code, frt.high_watermark, frt.last_stable_offset, frt.log_start_offset, frt.aborted_transactions, frt.preferred_read_replica, frt.records)
+}
+
+func (frat *FetchResponseAbortedTransaction) String() string {
+	return fmt.Sprintf("FetchResponseAbortedTransaction{producer_id: %d, first_offset: %d}", frat.producer_id, frat.first_offset)
+}

@@ -119,11 +119,9 @@ func (f *FetchResponse) toBytes() []byte {
 
 	// array length needs to be sent as a uvarint, use AppendVarint
 	lengthVarint := make([]byte, 0)
-	// arrayLength := len(f.responses) + 1
-	// if arrayLength == 1 {}
-
 	lengthVarint = binary.AppendUvarint(lengthVarint, uint64(len(f.responses)+1))
 	buf.Write(lengthVarint)
+
 	for _, response := range f.responses {
 		buf.Write(response.topic_id[:]) // Convert [16]byte to []byte
 
@@ -160,10 +158,29 @@ func createFetchResponseFromFetchRequest(fr FetchRequest) FetchResponse {
 		throttle_time_ms: 0,
 		error_code:       NONE,
 		session_id:       0,
-		responses: []FetchResponseTopic{
-			{
-				topic_id: fr.topics[0].topic_id,
-				partitions: []FetchResponsePartition{{
+		responses:        []FetchResponseTopic{
+			// {
+			// 	topic_id: fr.topics[0].topic_id,
+			// partitions: []FetchResponsePartition{{
+			// 	partition_index:        0,
+			// 	error_code:             0,
+			// 	high_watermark:         0,
+			// 	last_stable_offset:     0,
+			// 	log_start_offset:       0,
+			// 	aborted_transactions:   []FetchResponseAbortedTransaction{},
+			// 	preferred_read_replica: 0,
+			// 	records:                []byte{},
+			// }},
+			// },
+		},
+	}
+
+	// iterate over the fetch request topics
+	for _, topic := range fr.topics {
+		frr.responses = append(frr.responses, FetchResponseTopic{
+			topic_id: topic.topic_id,
+			partitions: []FetchResponsePartition{
+				{
 					partition_index:        0,
 					error_code:             0,
 					high_watermark:         0,
@@ -172,9 +189,12 @@ func createFetchResponseFromFetchRequest(fr FetchRequest) FetchResponse {
 					aborted_transactions:   []FetchResponseAbortedTransaction{},
 					preferred_read_replica: 0,
 					records:                []byte{},
-				}},
+				},
 			},
-		},
+		})
+	}
+	if len(fr.topics) > 0 {
+		frr.error_code = UNKNOWN_TOPIC_ID
 	}
 
 	return frr
@@ -186,7 +206,8 @@ func handleFetchRequest(conn net.Conn, message []byte) {
 	fmt.Println("Correlation ID (fetch): ", correlation_id)
 
 	fetch_request := createFetchRequestFromBytes(message)
-	fmt.Println(fetch_request)
+	// fmt.Println(fetch_request)
+	fmt.Printf("\n\n%+v\n\n", fetch_request)
 
 	// fetch_response := FetchResponse{
 	// 	correlation_id:   correlation_id,
@@ -197,16 +218,10 @@ func handleFetchRequest(conn net.Conn, message []byte) {
 	// }
 
 	fetch_response := createFetchResponseFromFetchRequest(fetch_request)
-	fetch_response.error_code = UNKNOWN_TOPIC_ID
 
 	fetch_response_bytes := fetch_response.toBytes()
 	fmt.Printf("Fetch Response bytes: %s\n", hex.EncodeToString(fetch_response_bytes))
 	fmt.Println("Fetch Response length: ", len(fetch_response_bytes))
-
-	// FIXME trimming off the last 53 bytes to see if it fixes the issue
-	// fetch_response_bytes = fetch_response_bytes[:len(fetch_response_bytes)-53]
-	// fmt.Printf("Fetch Response bytes: %s\n", hex.EncodeToString(fetch_response_bytes))
-	// fmt.Println("Fetch Response length: ", len(fetch_response_bytes))
 
 	response := createResponse(fetch_response_bytes)
 	conn.Write(response)

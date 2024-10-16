@@ -50,6 +50,10 @@ type GenericRequest struct {
 	client_id           []byte
 }
 
+func (gr *GenericRequest) String() string {
+	return fmt.Sprintf("GenericRequest{request_api_key: %d, request_api_version: %d, correlation_id: %d, client_id: %s}", gr.request_api_key, gr.request_api_version, gr.correlation_id, gr.client_id)
+}
+
 func createResponse(rawResponse []byte) []byte {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, uint32(len(rawResponse)))
